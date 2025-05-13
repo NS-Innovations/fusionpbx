@@ -10,7 +10,6 @@
 	}
 
 //include files
-	include "resources/classes/permissions.php";
 	include_once "resources/phpmailer/class.phpmailer.php";
 	include_once "resources/phpmailer/class.smtp.php";
 
@@ -157,7 +156,7 @@
 //get the email settings
 	$retry_limit = $settings->get('email_queue', 'retry_limit');
 	$transcribe_enabled = $settings->get('transcribe', 'enabled', false);
-	$save_response = $settings->get('email_queue', 'save_response');
+	$save_response = $settings->get('email_queue', 'save_response', false);
 
 //set defaults
 	if (empty($email_retry_count)) {
@@ -298,7 +297,7 @@
 	//echo "Body: ".$email_body."\n";
 
 //update the message transcription
-	if (isset($voicemail_transcription_enabled) && $voicemail_transcription_enabled == 'true' && isset($transcribe_message)) {
+	if (isset($voicemail_transcription_enabled) && $voicemail_transcription_enabled && isset($transcribe_message)) {
 		$sql = "update v_voicemail_messages ";
 		$sql .= "set message_transcription = :message_transcription ";
 		$sql .= "where voicemail_message_uuid = :voicemail_message_uuid; ";
@@ -369,7 +368,7 @@
 			$parameters['email_body'] = $email_body;
 			$parameters['email_transcription'] = $transcribe_message;
 		}
-		if (isset($save_response) && $save_response == 'true') {
+		if ($save_response) {
 			$sql .= "email_response = :email_response, ";
 			$parameters['email_response'] = $email_settings."\n".$email_response;
 		}
