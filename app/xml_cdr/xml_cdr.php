@@ -51,6 +51,7 @@
 	$permission['xml_cdr_domain'] = permission_exists('xml_cdr_domain');
 	$permission['xml_cdr_search_call_center_queues'] = permission_exists('xml_cdr_search_call_center_queues');
 	$permission['xml_cdr_search_ring_groups'] = permission_exists('xml_cdr_search_ring_groups');
+	$permission['xml_cdr_search_ivr_menus'] = permission_exists('xml_cdr_search_ivr_menus');
 	$permission['xml_cdr_statistics'] = permission_exists('xml_cdr_statistics');
 	$permission['xml_cdr_archive'] = permission_exists('xml_cdr_archive');
 	$permission['xml_cdr_all'] = permission_exists('xml_cdr_all');
@@ -67,6 +68,7 @@
 	$permission['xml_cdr_search_caller_destination'] = permission_exists('xml_cdr_search_caller_destination');
 	$permission['xml_cdr_search_destination'] = permission_exists('xml_cdr_search_destination');
 	$permission['xml_cdr_codecs'] = permission_exists('xml_cdr_codecs');
+	$permission['xml_cdr_search_wait'] = permission_exists('xml_cdr_search_wait');
 	$permission['xml_cdr_search_tta'] = permission_exists('xml_cdr_search_tta');
 	$permission['xml_cdr_search_hangup_cause'] = permission_exists('xml_cdr_search_hangup_cause');
 	$permission['xml_cdr_search_recording'] = permission_exists('xml_cdr_search_recording');
@@ -77,6 +79,7 @@
 	$permission['xml_cdr_caller_destination'] = permission_exists('xml_cdr_caller_destination');
 	$permission['xml_cdr_destination'] = permission_exists('xml_cdr_destination');
 	$permission['xml_cdr_start'] = permission_exists('xml_cdr_start');
+	$permission['xml_cdr_wait'] = permission_exists('xml_cdr_wait');
 	$permission['xml_cdr_tta'] = permission_exists('xml_cdr_tta');
 	$permission['xml_cdr_duration'] = permission_exists('xml_cdr_duration');
 	$permission['xml_cdr_pdd'] = permission_exists('xml_cdr_pdd');
@@ -155,9 +158,20 @@
 	if ($permission['xml_cdr_search_ring_groups']) {
 		$sql = "select ring_group_uuid, ring_group_name, ring_group_extension from v_ring_groups ";
 		$sql .= "where domain_uuid = :domain_uuid ";
+		$sql .= "and ring_group_enabled = 'true' ";
 		$sql .= "order by ring_group_extension asc ";
 		$parameters['domain_uuid'] = $_SESSION['domain_uuid'];
 		$ring_groups = $database->select($sql, $parameters, 'all');
+	}
+
+//get the ivr menus
+	if ($permission['xml_cdr_search_ivr_menus']) {
+		$sql = "select ivr_menu_uuid, ivr_menu_name, ivr_menu_extension from v_ivr_menus ";
+		$sql .= "where domain_uuid = :domain_uuid ";
+		$sql .= "and ivr_menu_enabled = 'true' ";
+		$sql .= "order by ivr_menu_extension asc ";
+		$parameters['domain_uuid'] = $_SESSION['domain_uuid'];
+		$ivr_menus = $database->select($sql, $parameters, 'all');
 	}
 
 //get the call center queues
@@ -262,8 +276,13 @@
 	echo "		<input type='hidden' name='network_addr' value='".escape($network_addr ?? '')."'>\n";
 	echo "		<input type='hidden' name='bridge_uuid' value='".escape($bridge_uuid ?? '')."'>\n";
 	echo "		<input type='hidden' name='leg' value='".escape($leg ?? '')."'>\n";
+	echo "		<input type='hidden' name='wait_min' value='".escape($wait_min ?? '')."'>\n";
+	echo "		<input type='hidden' name='wait_max' value='".escape($wait_max ?? '')."'>\n";
 	echo "		<input type='hidden' name='tta_min' value='".escape($tta_min ?? '')."'>\n";
 	echo "		<input type='hidden' name='tta_max' value='".escape($tta_max ?? '')."'>\n";
+	echo "		<input type='hidden' name='call_center_queue_uuid' value='".escape($call_center_queue_uuid ?? '')."'>\n";
+	echo "		<input type='hidden' name='ring_group_uuid' value='".escape($ring_group_uuid ?? '')."'>\n";
+	echo "		<input type='hidden' name='recording' value='".escape($recording ?? '')."'>\n";
 	if ($permission['xml_cdr_all'] && $_REQUEST['show'] == 'all') {
 		echo "	<input type='hidden' name='show' value='all'>\n";
 	}
@@ -452,6 +471,17 @@
 			echo "		</div>\n";
 			echo "	</div>\n";
 		}
+		if ($permission['xml_cdr_search_wait']) {
+			echo "	<div class='form_set'>\n";
+			echo "		<div class='label'>\n";
+			echo "			".$text['label-wait']." (".$text['label-seconds'].")\n";
+			echo "		</div>\n";
+			echo "		<div class='field no-wrap'>\n";
+			echo "			<input type='text' class='formfld' style='min-width: 75px; width: 75px;' name='wait_min' id='wait_min' value='".escape($wait_min)."' placeholder=\"".$text['label-minimum']."\">\n";
+			echo "			<input type='text' class='formfld' style='min-width: 75px; width: 75px;' name='wait_max' id='wait_max' value='".escape($wait_max)."' placeholder=\"".$text['label-maximum']."\">\n";
+			echo "		</div>\n";
+			echo "	</div>\n";
+		}
 		if ($permission['xml_cdr_search_tta']) {
 			echo "	<div class='form_set'>\n";
 			echo "		<div class='label'>\n";
@@ -463,7 +493,6 @@
 			echo "		</div>\n";
 			echo "	</div>\n";
 		}
-
 		if ($permission['xml_cdr_search_hangup_cause']) {
 			echo "	<div class='form_set'>\n";
 			echo "		<div class='label'>\n";
@@ -556,6 +585,9 @@
 			if ($permission['xml_cdr_start']) {
 				echo "			<option value='start_stamp' ".($order_by == 'start_stamp' || $order_by == '' ? "selected='selected'" : null).">".$text['label-start']."</option>\n";
 			}
+			if ($permission['xml_cdr_wait']) {
+				echo "			<option value='wait' ".($order_by == 'wait' ? "selected='selected'" : null).">".$text['label-wait']."</option>\n";
+			}
 			if ($permission['xml_cdr_tta']) {
 				echo "			<option value='tta' ".($order_by == 'tta' ? "selected='selected'" : null).">".$text['label-tta']."</option>\n";
 			}
@@ -595,7 +627,7 @@
 			echo "		</div>\n";
 			echo "	</div>\n";
 
-			if ($permission['xml_cdr_search_call_center_queues']) {
+			if ($permission['xml_cdr_search_call_center_queues'] && is_array($call_center_queues) && @sizeof($call_center_queues) != 0) {
 				echo "	<div class='form_set'>\n";
 				echo "		<div class='label'>\n";
 				echo "			".$text['label-call_center_queue']."\n";
@@ -603,19 +635,17 @@
 				echo "		<div class='field'>\n";
 				echo "			<select class='formfld' name='call_center_queue_uuid' id='call_center_queue_uuid'>\n";
 				echo "				<option value=''></option>";
-				if (is_array($call_center_queues) && @sizeof($call_center_queues) != 0) {
-					foreach ($call_center_queues as $row) {
-						$selected = ($row['call_center_queue_uuid'] == $call_center_queue_uuid) ? "selected" : null;
-						echo "		<option value='".escape($row['call_center_queue_uuid'])."' ".escape($selected).">".((is_numeric($row['queue_extension'])) ? escape($row['queue_extension']." (".$row['queue_name'].")") : escape($row['queue_extension'])." (".escape($row['queue_extension']).")")."</option>";
-					}
+				foreach ($call_center_queues as $row) {
+					$selected = ($row['call_center_queue_uuid'] == $call_center_queue_uuid) ? "selected" : null;
+					echo "		<option value='".escape($row['call_center_queue_uuid'])."' ".escape($selected).">".((is_numeric($row['queue_extension'])) ? escape($row['queue_extension']." (".$row['queue_name'].")") : escape($row['queue_extension'])." (".escape($row['queue_extension']).")")."</option>";
 				}
 				echo "			</select>\n";
 				echo "		</div>\n";
 				echo "	</div>\n";
-				unset($sql, $parameters, $call_center_queues, $row, $selected);
+				unset($call_center_queues, $row, $selected);
 			}
 
-			if ($permission['xml_cdr_search_ring_groups']) {
+			if ($permission['xml_cdr_search_ring_groups'] && is_array($ring_groups) && @sizeof($ring_groups) != 0) {
 				echo "	<div class='form_set'>\n";
 				echo "		<div class='label'>\n";
 				echo "			".$text['label-ring_group']."\n";
@@ -623,17 +653,33 @@
 				echo "		<div class='field'>\n";
 				echo "			<select class='formfld' name='ring_group_uuid' id='ring_group_uuid'>\n";
 				echo "				<option value=''></option>";
-				if (is_array($ring_groups) && @sizeof($ring_groups) != 0) {
-					foreach ($ring_groups as $row) {
-						$selected = ($row['ring_group_uuid'] == $ring_group_uuid) ? "selected" : null;
-						echo "		<option value='".escape($row['ring_group_uuid'])."' ".escape($selected).">".((is_numeric($row['ring_group_extension'])) ? escape($row['ring_group_extension']." (".$row['ring_group_name'].")") : escape($row['ring_group_extension'])." (".escape($row['ring_group_extension']).")")."</option>";
-					}
+				foreach ($ring_groups as $row) {
+					$selected = ($row['ring_group_uuid'] == $ring_group_uuid) ? "selected" : null;
+					echo "		<option value='".escape($row['ring_group_uuid'])."' ".escape($selected).">".((is_numeric($row['ring_group_extension'])) ? escape($row['ring_group_extension']." (".$row['ring_group_name'].")") : escape($row['ring_group_extension'])." (".escape($row['ring_group_extension']).")")."</option>";
 				}
 				echo "			</select>\n";
 				echo "		</div>\n";
 				echo "	</div>\n";
-				unset($sql, $parameters, $ring_groups, $row, $selected);
+				unset($ring_groups, $row, $selected);
 			}
+		}
+
+		if ($permission['xml_cdr_search_ivr_menus'] && is_array($ivr_menus) && @sizeof($ivr_menus) != 0) {
+			echo "	<div class='form_set'>\n";
+			echo "		<div class='label'>\n";
+			echo "			".$text['label-ivr_menu']."\n";
+			echo "		</div>\n";
+			echo "		<div class='field'>\n";
+			echo "			<select class='formfld' name='ivr_menu_uuid' id='ivr_menu_uuid'>\n";
+			echo "				<option value=''></option>";
+			foreach ($ivr_menus as $row) {
+				$selected = ($row['ivr_menu_uuid'] == $ivr_menu_uuid) ? "selected" : null;
+				echo "		<option value='".escape($row['ivr_menu_uuid'])."' ".escape($selected).">".((is_numeric($row['ivr_menu_extension'])) ? escape($row['ivr_menu_extension']." (".$row['ivr_menu_name'].")") : escape($row['ivr_menu_extension'])." (".escape($row['ivr_menu_extension']).")")."</option>";
+			}
+			echo "			</select>\n";
+			echo "		</div>\n";
+			echo "	</div>\n";
+			unset($ivr_menus, $row, $selected);
 		}
 
 		echo "</div>\n";
@@ -747,6 +793,10 @@
 	}
 	if ($permission['xml_cdr_codecs']) {
 		echo "<th class='center shrink hide-lg-dn'>".$text['label-codecs']."</th>\n";
+		$col_count++;
+	}
+	if ($permission['xml_cdr_wait']) {
+		echo "<th class='right hide-lg-dn'>".$text['label-wait']."</th>\n";
 		$col_count++;
 	}
 	if ($permission['xml_cdr_tta']) {
@@ -1022,13 +1072,17 @@
 					if ($permission['xml_cdr_codecs']) {
 						$content .= "	<td class='middle right hide-lg-dn no-wrap'>".($row['read_codec'] ?? '').' / '.($row['write_codec'] ?? '')."</td>\n";
 					}
+				//wait - total time caller waited
+					if ($permission['xml_cdr_wait']) {
+						$content .= "	<td class='middle right hide-lg-dn'>".(!empty($row['wait']) && $row['wait'] >= 0 ? gmdate("i:s", $row['wait']) : "&nbsp;")."</td>\n";
+					}
 				//tta (time to answer)
 					if ($permission['xml_cdr_tta']) {
-						$content .= "	<td class='middle right hide-lg-dn'>".(!empty($row['tta']) && $row['tta'] >= 0 ? $row['tta']."s" : "&nbsp;")."</td>\n";
+						$content .= "	<td class='middle right hide-lg-dn'>".(!empty($row['tta']) && $row['tta'] >= 0 ? $row['tta'] : "&nbsp;")."</td>\n";
 					}
 				//pdd (post dial delay)
 					if ($permission['xml_cdr_pdd']) {
-						$content .= "	<td class='middle right hide-lg-dn'>".number_format(escape($row['pdd_ms'])/1000,2)."s</td>\n";
+						$content .= "	<td class='middle right hide-lg-dn'>".number_format(escape($row['pdd_ms'])/1000,2)."</td>\n";
 					}
 				//mos (mean opinion score)
 					if ($permission['xml_cdr_mos']) {

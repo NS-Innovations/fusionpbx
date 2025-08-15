@@ -17,7 +17,7 @@
 
 	The Initial Developer of the Original Code is
 	Mark J Crane <markjcrane@fusionpbx.com>
-	Portions created by the Initial Developer are Copyright (C) 2013-2023
+	Portions created by the Initial Developer are Copyright (C) 2013-2025
 	the Initial Developer. All Rights Reserved.
 
 	Contributor(s):
@@ -153,11 +153,11 @@
 //ring group forward
 	echo "<div class='hud_box'>\n";
 
-	echo "	<div class='hud_content' ".($dashboard_details_state == "disabled" ?: "onclick=\"$('#hud_ring_group_forward_details').slideToggle('fast'); toggle_grid_row_end('".$dashboard_name."')\"").">\n";
+	echo "	<div class='hud_content' ".($dashboard_details_state == "disabled" ?: "onclick=\"$('#hud_ring_group_forward_details').slideToggle('fast');\"").">\n";
 	echo "		<span class='hud_title'>".$text['header-ring-group-forward']."</span>\n";
 
 //doughnut chart
-	if (!isset($dashboard_chart_type) ||$dashboard_chart_type == "doughnut") {
+	if (empty($dashboard_chart_type) ||$dashboard_chart_type == "doughnut") {
 		echo "	<div class='hud_chart' style='width: 275px;'><canvas id='ring_group_forward_chart'></canvas></div>\n";
 
 		echo "<script>\n";
@@ -307,7 +307,7 @@
 			echo "</form>\n";
 		}
 
-		echo "<span class='hud_expander' onclick=\"$('#hud_ring_group_forward_details').slideToggle('fast'); toggle_grid_row_end('".$dashboard_name."')\"><span class='fas fa-ellipsis-h'></span></span>";
+		echo "<span class='hud_expander' onclick=\"$('#hud_ring_group_forward_details').slideToggle('fast');\"><span class='fas fa-ellipsis-h'></span></span>";
 	}
 	echo "</div>\n";
 

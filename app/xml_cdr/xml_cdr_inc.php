@@ -47,6 +47,7 @@
 	$permission['xml_cdr_domain'] = permission_exists('xml_cdr_domain');
 	$permission['xml_cdr_search_call_center_queues'] = permission_exists('xml_cdr_search_call_center_queues');
 	$permission['xml_cdr_search_ring_groups'] = permission_exists('xml_cdr_search_ring_groups');
+	$permission['xml_cdr_search_ivr_menus'] = permission_exists('xml_cdr_search_ivr_menus');
 	$permission['xml_cdr_statistics'] = permission_exists('xml_cdr_statistics');
 	$permission['xml_cdr_archive'] = permission_exists('xml_cdr_archive');
 	$permission['xml_cdr_all'] = permission_exists('xml_cdr_all');
@@ -63,6 +64,7 @@
 	$permission['xml_cdr_search_caller_destination'] = permission_exists('xml_cdr_search_caller_destination');
 	$permission['xml_cdr_search_destination'] = permission_exists('xml_cdr_search_destination');
 	$permission['xml_cdr_codecs'] = permission_exists('xml_cdr_codecs');
+	$permission['xml_cdr_search_wait'] = permission_exists('xml_cdr_search_wait');
 	$permission['xml_cdr_search_tta'] = permission_exists('xml_cdr_search_tta');
 	$permission['xml_cdr_search_hangup_cause'] = permission_exists('xml_cdr_search_hangup_cause');
 	$permission['xml_cdr_search_recording'] = permission_exists('xml_cdr_search_recording');
@@ -73,6 +75,7 @@
 	$permission['xml_cdr_caller_destination'] = permission_exists('xml_cdr_caller_destination');
 	$permission['xml_cdr_destination'] = permission_exists('xml_cdr_destination');
 	$permission['xml_cdr_start'] = permission_exists('xml_cdr_start');
+	$permission['xml_cdr_wait'] = permission_exists('xml_cdr_wait');
 	$permission['xml_cdr_tta'] = permission_exists('xml_cdr_tta');
 	$permission['xml_cdr_duration'] = permission_exists('xml_cdr_duration');
 	$permission['xml_cdr_pdd'] = permission_exists('xml_cdr_pdd');
@@ -134,6 +137,8 @@
 		$remote_media_ip = $_REQUEST["remote_media_ip"] ?? '';
 		$network_addr = $_REQUEST["network_addr"] ?? '';
 		$bridge_uuid = $_REQUEST["network_addr"] ?? '';
+		$wait_min = $_REQUEST['wait_min'] ?? '';
+		$wait_max = $_REQUEST['wait_max'] ?? '';
 		$tta_min = $_REQUEST['tta_min'] ?? '';
 		$tta_max = $_REQUEST['tta_max'] ?? '';
 		$recording = $_REQUEST['recording'] ?? '';
@@ -142,6 +147,7 @@
 		$cc_side = $_REQUEST["cc_side"] ?? '';
 		$call_center_queue_uuid = $_REQUEST["call_center_queue_uuid"] ?? '';
 		$ring_group_uuid = $_REQUEST["ring_group_uuid"] ?? '';
+		$ivr_menu_uuid = $_REQUEST["ivr_menu_uuid"] ?? '';
 		if (isset($_SESSION['cdr']['field']) && is_array($_SESSION['cdr']['field'])) {
 			foreach ($_SESSION['cdr']['field'] as $field) {
 				$array = explode(",", $field);
@@ -234,6 +240,8 @@
 	$param .= "&bridge_uuid=".urlencode($bridge_uuid ?? '');
 	$param .= "&mos_comparison=".urlencode($mos_comparison ?? '');
 	$param .= "&mos_score=".urlencode($mos_score ?? '');
+	$param .= "&wait_min=".urlencode($wait_min ?? '');
+	$param .= "&wait_max=".urlencode($wait_max ?? '');
 	$param .= "&tta_min=".urlencode($tta_min ?? '');
 	$param .= "&tta_max=".urlencode($tta_max ?? '');
 	$param .= "&recording=".urlencode($recording ?? '');
@@ -364,6 +372,7 @@
 	if ($permission['xml_cdr_mos']) {
 		$sql .= "c.rtp_audio_in_mos, \n";
 	}
+	$sql .= "c.waitsec as wait, ";
 	$sql .= "(c.answer_epoch - c.start_epoch) as tta ";
 	if (!empty($_REQUEST['show']) && $_REQUEST['show'] == "all" && $permission['xml_cdr_all']) {
 		$sql .= ", c.domain_name \n";
@@ -582,6 +591,14 @@
 		$sql .= "and leg = :leg \n";
 		$parameters['leg'] = $leg;
 	}
+	if (is_numeric($wait_min)) {
+		$sql .= "and waitsec >= :wait_min \n";
+		$parameters['wait_min'] = $wait_min;
+	}
+	if (is_numeric($wait_max)) {
+		$sql .= "and waitsec <= :wait_max \n";
+		$parameters['wait_max'] = $wait_max;
+	}
 	if (is_numeric($tta_min)) {
 		$sql .= "and (c.answer_epoch - c.start_epoch) >= :tta_min \n";
 		$parameters['tta_min'] = $tta_min;
@@ -616,6 +633,11 @@
 	if (!empty($ring_group_uuid)) {
 		$sql .= "and ring_group_uuid = :ring_group_uuid \n";
 		$parameters['ring_group_uuid'] = $ring_group_uuid;
+	}
+	//show specific ivr menus
+	if (!empty($ivr_menu_uuid)) {
+		$sql .= "and ivr_menu_uuid = :ivr_menu_uuid \n";
+		$parameters['ivr_menu_uuid'] = $ivr_menu_uuid;
 	}
 	//end where
 	if (!empty($order_by)) {

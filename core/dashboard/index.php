@@ -105,15 +105,15 @@
 	$sql .= "dashboard_details_state, ";
 	$sql .= "dashboard_order, ";
 	$sql .= "cast(dashboard_enabled as text), ";
-	$sql .= "dashboard_description ";
+	$sql .= "dashboard_description, ";
+	$sql .= "dashboard_parent_uuid ";
 	$sql .= "from v_dashboard as d ";
 	$sql .= "where dashboard_enabled = 'true' ";
-	$sql .= "and dashboard_parent_uuid is null ";
-	$sql .= "and dashboard_uuid in (";
-	$sql .= "	select dashboard_uuid from v_dashboard_groups where group_uuid in (";
+	$sql .= "and dashboard_uuid in ( ";
+	$sql .= "	select dashboard_uuid from v_dashboard_groups where group_uuid in ( ";
 	$sql .= "		".$group_uuids_in." ";
-	$sql .= "	)";
-	$sql .= ")";
+	$sql .= "	) ";
+	$sql .= ") ";
 	$sql .= "order by dashboard_order, dashboard_name asc ";
 	$dashboard = $database->select($sql, $parameters ?? null, 'all');
 	unset($sql, $parameters);
@@ -123,13 +123,25 @@
 		//set the variables from the http values
 		if (isset($_POST["widget_order"])) {
 			$widgets = explode(",", $_POST["widget_order"]);
-			$dashboard_order = '0';
 			$x = 0;
+
 			foreach ($widgets as $widget) {
+				list($widget_id, $parent_id, $order) = explode("|", $widget);
+				$parent_uuid = null;
+
 				foreach ($dashboard as $row) {
-					$dashboard_name = trim(preg_replace("/[^a-z]/", '_', strtolower($row['dashboard_name'])),'_');
-					if ($widget == $dashboard_name) {
-						$dashboard_order = $dashboard_order + 10;
+					$dashboard_id = 'id_'.md5(preg_replace('/[^-A-Fa-f0-9]/', '', $row['dashboard_uuid']));
+					if ($widget_id == $dashboard_id) {
+						if (!empty($parent_id)) {
+							//find parent uuid
+							foreach ($dashboard as $parent_row) {
+								$parent_dashboard_id = 'id_'.md5(preg_replace('/[^-A-Fa-f0-9]/', '', $parent_row['dashboard_uuid']));
+								if ($parent_dashboard_id === $parent_id) {
+									$parent_uuid = $parent_row['dashboard_uuid'];
+									break;
+								}
+							}
+						}
 						$array['dashboard'][$x]['dashboard_uuid'] = $row['dashboard_uuid'];
 						$array['dashboard'][$x]['dashboard_name'] = $row['dashboard_name'];
 						$array['dashboard'][$x]['dashboard_icon'] = $row['dashboard_icon'];
@@ -140,8 +152,10 @@
 						$array['dashboard'][$x]['dashboard_target'] = $row['dashboard_target'];
 						$array['dashboard'][$x]['dashboard_width'] = $row['dashboard_width'];
 						$array['dashboard'][$x]['dashboard_height'] = $row['dashboard_height'];
-						$array['dashboard'][$x]['dashboard_order'] = $dashboard_order;
+						$array['dashboard'][$x]['dashboard_order'] = $order;
+						$array['dashboard'][$x]['dashboard_parent_uuid'] = $parent_uuid;
 						$x++;
+						break;
 					}
 				}
 			}
@@ -170,6 +184,10 @@
 //load the header
 	$document['title'] = $text['title-dashboard'];
 	require_once "resources/header.php";
+
+//include websockets
+	$version = md5(file_get_contents(__DIR__, '/resources/javascript/ws_client.js'));
+	echo "<script src='/core/dashboard/resources/javascript/ws_client.js?v=$version'></script>\n";
 
 //include sortablejs
 	echo "<script src='/resources/sortablejs/sortable.min.js'></script>";
@@ -208,8 +226,8 @@
 		echo button::create(['type'=>'submit','label'=>$text['button-save'],'icon'=>$settings->get('theme', 'button_icon_save'),'id'=>'btn_save','name'=>'btn_save','style'=>'display: none; margin-left: 15px;']);
 	}
 	echo "<span id='expand_contract'>\n";
-		echo button::create(['type'=>'button','label'=>$text['button-expand_all'],'icon'=>$settings->get('theme', 'button_icon_expand'),'id'=>'btn_expand','name'=>'btn_expand','style'=>($expanded_all ? 'display: none;' : null),'onclick'=>"$('.hud_details').slideDown('fast'); $(this).hide(); $('#btn_contract').show(); toggle_grid_row_end_all();"]);
-		echo button::create(['type'=>'button','label'=>$text['button-collapse_all'],'icon'=>$settings->get('theme', 'button_icon_contract'),'id'=>'btn_contract','name'=>'btn_contract','style'=>(!$expanded_all ? 'display: none;' : null),'onclick'=>"$('.hud_details').slideUp('fast'); $(this).hide(); $('#btn_expand').show(); toggle_grid_row_end_all();"]);
+		echo button::create(['type'=>'button','label'=>$text['button-expand_all'],'icon'=>$settings->get('theme', 'button_icon_expand'),'id'=>'btn_expand','name'=>'btn_expand','style'=>($expanded_all ? 'display: none;' : null),'onclick'=>"$('.hud_details').slideDown('fast'); $(this).hide(); $('#btn_contract').show(); toggle_grid_row_span_all();"]);
+		echo button::create(['type'=>'button','label'=>$text['button-collapse_all'],'icon'=>$settings->get('theme', 'button_icon_contract'),'id'=>'btn_contract','name'=>'btn_contract','style'=>(!$expanded_all ? 'display: none;' : null),'onclick'=>"$('.hud_details').slideUp('fast'); $(this).hide(); $('#btn_expand').show(); toggle_grid_row_span_all();"]);
 	echo "</span>\n";
 	if (permission_exists('dashboard_edit')) {
 		echo button::create(['type'=>'button','label'=>$text['button-edit'],'icon'=>$settings->get('theme', 'button_icon_edit'),'id'=>'btn_edit','name'=>'btn_edit','style'=>'margin-left: 15px;','onclick'=>"edit_mode('on');"]);
@@ -266,37 +284,48 @@ div.hud_chart {
 /* dashboard settings */
 <?php
 foreach ($dashboard as $row) {
-	$dashboard_name = trim(preg_replace("/[^a-z]/", '_', strtolower($row['dashboard_name'])),'_');
+	$dashboard_id = 'id_'.md5(preg_replace('/[^-A-Fa-f0-9]/', '', $row['dashboard_uuid']));
 	if (!empty($row['dashboard_icon_color'])) {
-		echo "#".$dashboard_name." .hud_stat:has(i) {\n";
+		echo "#".$dashboard_id." .hud_stat .fas {\n";
 		echo "	color: ".$row['dashboard_icon_color'].";\n";
 		echo "}\n";
 	}
+	if ($row['dashboard_label_enabled'] == 'false' && $row['dashboard_path'] != 'dashboard/parent') {
+		echo "#".$dashboard_id." .hud_title:first-of-type {\n";
+		echo "	display: none;\n";
+		echo "}\n";
+		echo "#".$dashboard_id." .hud_content {\n";
+		echo "	align-content: center;\n";
+		echo "}\n";
+		echo "#".$dashboard_id." .hud_chart {\n";
+		echo "	padding-top: 0;\n";
+		echo "}\n";
+	}
 	if (!empty($row['dashboard_label_text_color']) || !empty($row['dashboard_label_background_color'])) {
-		echo "#".$dashboard_name." .hud_title {\n";
+		echo "#".$dashboard_id." > .hud_box > .hud_content > .hud_title:first-of-type {\n";
 		if (!empty($row['dashboard_label_text_color'])) { echo "	color: ".$row['dashboard_label_text_color'].";\n"; }
 		if (!empty($row['dashboard_label_background_color'])) { echo "	background-color: ".$row['dashboard_label_background_color'].";\n"; }
 		echo "}\n";
 	}
 	if (!empty($row['dashboard_label_text_color_hover']) || !empty($row['dashboard_label_background_color_hover'])) {
-		echo "#".$dashboard_name.":hover .hud_title {\n";
+		echo "#".$dashboard_id.":hover  > .hud_box > .hud_content > .hud_title:first-of-type {\n";
 		if (!empty($row['dashboard_label_text_color_hover'])) { echo "	color: ".$row['dashboard_label_text_color_hover'].";\n"; }
 		if (!empty($row['dashboard_label_background_color_hover'])) { echo "	background-color: ".$row['dashboard_label_background_color_hover'].";\n"; }
 		echo "}\n";
 	}
 	if (!empty($row['dashboard_number_text_color'])) {
-		echo "#".$dashboard_name." .hud_stat {\n";
+		echo "#".$dashboard_id." > .hud_box > .hud_content > .hud_stat {\n";
 		echo "	color: ".$row['dashboard_number_text_color'].";\n";
 		echo "}\n";
 	}
 	if (!empty($row['dashboard_number_text_color_hover'])) {
-		echo "#".$dashboard_name.":hover .hud_stat {\n";
+		echo "#".$dashboard_id.":hover > .hud_box > .hud_content > .hud_stat {\n";
 		echo "	color: ".$row['dashboard_number_text_color_hover'].";\n";
 		echo "}\n";
 	}
 	if (!empty($row['dashboard_background_color'])) {
 		$background_color = json_decode($row['dashboard_background_color'], true);
-		echo "#".$dashboard_name." .hud_content {\n";
+		echo "#".$dashboard_id." > .hud_box:first-of-type {\n";
 		echo "	background: ".$background_color[0].";\n";
 		if (empty($row['dashboard_background_gradient_style']) || $row['dashboard_background_gradient_style'] == 'mirror') {
 			echo "	background-image: linear-gradient(".(empty($row['dashboard_background_gradient_angle']) ? '0deg' : $row['dashboard_background_gradient_angle'].'deg').", ".$background_color[1]." 0%, ".$background_color[0]." 30%, ".$background_color[0]." 70%, ".$background_color[1]." 100%);\n";
@@ -308,7 +337,7 @@ foreach ($dashboard as $row) {
 	}
 	if (!empty($row['dashboard_background_color_hover'])) {
 		$background_color_hover = json_decode($row['dashboard_background_color_hover'], true);
-		echo "#".$dashboard_name.":hover .hud_content {\n";
+		echo "#".$dashboard_id.":hover > .hud_box:first-of-type {\n";
 		echo "	background: ".$background_color_hover[0].";\n";
 		if (empty($row['dashboard_background_gradient_style']) || $row['dashboard_background_gradient_style'] == 'mirror') {
 			echo "	background-image: linear-gradient(".(empty($row['dashboard_background_gradient_angle']) ? '0deg' : $row['dashboard_background_gradient_angle'].'deg').", ".$background_color_hover[1]." 0%, ".$background_color_hover[0]." 30%, ".$background_color_hover[0]." 70%, ".$background_color_hover[1]." 100%);\n";
@@ -320,7 +349,7 @@ foreach ($dashboard as $row) {
 	}
 	if (!empty($row['dashboard_detail_background_color'])) {
 		$detail_background_color = json_decode($row['dashboard_detail_background_color'], true);
-		echo "#".$dashboard_name." .hud_details {\n";
+		echo "#".$dashboard_id." > .hud_box > .hud_details {\n";
 		echo "	background: ".$detail_background_color[0].";\n";
 		if (empty($row['dashboard_background_gradient_style']) || $row['dashboard_background_gradient_style'] == 'mirror') {
 			echo "	background-image: linear-gradient(".(empty($row['dashboard_background_gradient_angle']) ? '0deg' : $row['dashboard_background_gradient_angle'].'deg').", ".$detail_background_color[1]." 0%, ".$detail_background_color[0]." 30%, ".$detail_background_color[0]." 70%, ".$detail_background_color[1]." 100%);\n";
@@ -330,59 +359,76 @@ foreach ($dashboard as $row) {
 		}
 		echo "}\n";
 	}
-	if ($row['dashboard_label_enabled'] == 'false') {
-		echo "#".$dashboard_name." .hud_title {\n";
-		echo "	display: none;\n";
-		echo "}\n";
-		echo "#".$dashboard_name." .hud_content {\n";
-		echo "	align-content: center;\n";
-		echo "}\n";
-		echo "#".$dashboard_name." .hud_chart {\n";
-		echo "	padding-top: 0;\n";
-		echo "}\n";
-	}
 	if ($row['dashboard_path'] == "dashboard/icon") {
-		echo "#".$dashboard_name." div.hud_content,\n";
-		echo "#".$dashboard_name." span.hud_title,\n";
-		echo "#".$dashboard_name." span.hud_stat {\n";
+		echo "#".$dashboard_id." div.hud_content,\n";
+		echo "#".$dashboard_id." span.hud_title,\n";
+		echo "#".$dashboard_id." span.hud_stat {\n";
 		echo "	transition: .4s;\n";
 		echo "}\n";
 	}
 	switch ($row['dashboard_row_span']) {
 		case 1:
-			echo "#".$dashboard_name." .hud_content {\n";
+			echo "#".$dashboard_id." > .hud_box > .hud_content {\n";
 			echo "	height: 89.5px;\n";
 			echo "}\n";
-			echo "#".$dashboard_name." .hud_stat {\n";
+			echo "#".$dashboard_id." .hud_stat {\n";
 			echo "	line-height: 0;\n";
 			echo "	font-size: 30pt;\n";
 			echo "}\n";
-			echo "#".$dashboard_name." .hud_chart {\n";
+			echo "#".$dashboard_id." .hud_chart {\n";
 			echo "	height: 54px;\n";
 			echo "	width: 180px;\n";
 			echo "	padding-top: 0;\n";
 			echo "}\n";
-			echo "#".$dashboard_name." div.hud_content .fas {\n";
+			echo "#".$dashboard_id." .hud_stat .fas {\n";
 			echo "	line-height: 0;\n";
 			echo "	font-size: 24pt;\n";
 			echo "}\n";
 			break;
 		case 2:
-			echo "#".$dashboard_name." .hud_content {\n";
+			echo "#".$dashboard_id." > .hud_box > .hud_content {\n";
 			echo "	height: 195px;\n";
 			echo "}\n";
 			break;
 		case 3:
-			echo "#".$dashboard_name." .hud_content {\n";
+			echo "#".$dashboard_id." > .hud_box > .hud_content {\n";
 			echo "	height: 300.5px;\n";
 			echo "}\n";
 			break;
+		case 4:
+			echo "#".$dashboard_id." > .hud_box > .hud_content {\n";
+			echo "	height: 406px;\n";
+			echo "}\n";
+			break;
 		default: //if empty
-			echo "#".$dashboard_name." .hud_content {\n";
+			echo "#".$dashboard_id." > .hud_box > .hud_content {\n";
 			echo "	height: 195px;\n";
 			echo "}\n";
 	}
-
+	$row_span = $row['dashboard_row_span'] * 4;
+	$expanded_row_span = $row_span + 13;
+	if ($row['dashboard_details_state'] === "expanded" || $row['dashboard_details_state'] === "contracted") {
+		$row_span += 1;
+		$expanded_row_span += 1;
+	}
+	if (!empty($row['dashboard_row_span'])) {
+		echo "#".$dashboard_id." {\n";
+		echo "	grid-row: span ".$row_span.";\n";
+		echo "}\n";
+		echo "#".$dashboard_id.".expanded {\n";
+		echo "	grid-row: span ".$expanded_row_span.";\n";
+		echo "}\n";
+	}
+	if (!empty($row['dashboard_column_span'])) {
+		echo "#".$dashboard_id." {\n";
+		echo "	grid-column: span ".$row['dashboard_column_span'].";\n";
+		echo "}\n";
+	}
+	if ($row['dashboard_path'] != "dashboard/icon" && $row['dashboard_chart_type'] != "icon" && $row['dashboard_column_span'] == 1) {
+		echo "#".$dashboard_id.".child_widget {\n";
+		echo "	grid-column: span 2;\n";
+		echo "}\n";
+	}
 }
 ?>
 
@@ -392,15 +438,15 @@ foreach ($dashboard as $row) {
 	.col-num { grid-column: span 1; }
 	<?php
 		foreach ($dashboard as $row) {
-			$dashboard_name = trim(preg_replace("/[^a-z]/", '_', strtolower($row['dashboard_name'])),'_');
-			if (isset($row['dashboard_column_span']) && is_numeric($row['dashboard_column_span'])) {
-				echo "#".$dashboard_name." {\n";
+			$dashboard_id = 'id_'.md5(preg_replace('/[^-A-Fa-f0-9]/', '', $row['dashboard_uuid']));
+			if (!empty($row['dashboard_column_span'])) {
+				echo "#".$dashboard_id." {\n";
 				echo "	grid-column: span 1;\n";
 				echo "}\n";
 			}
 			if ($row['dashboard_details_state'] == "hidden" || $row['dashboard_details_state'] == "disabled") {
-				echo "#".$dashboard_name." .hud_box .hud_expander, \n";
-				echo "#".$dashboard_name." .hud_box .hud_details {\n";
+				echo "#".$dashboard_id." .hud_box .hud_expander, \n";
+				echo "#".$dashboard_id." .hud_box .hud_details {\n";
 				echo "	display: none;\n";
 				echo "}\n";
 			}
@@ -414,20 +460,25 @@ foreach ($dashboard as $row) {
 	.col-num { grid-column: span 2; }
 	<?php
 		foreach ($dashboard as $row) {
-			$dashboard_name = trim(preg_replace("/[^a-z]/", '_', strtolower($row['dashboard_name'])),'_');
-			if (is_numeric($row['dashboard_column_span'])) {
-				echo "#".$dashboard_name." {\n";
-				echo "	grid-column: span ".$row['dashboard_column_span'].";\n";
+			$dashboard_id = 'id_'.md5(preg_replace('/[^-A-Fa-f0-9]/', '', $row['dashboard_uuid']));
+			if ($row['dashboard_column_span'] > 2) {
+				echo "#".$dashboard_id." {\n";
+				echo "	grid-column: span 2;\n";
+				echo "}\n";
+			}
+			if ($row['dashboard_details_state'] == "expanded") {
+				echo "#".$dashboard_id." .hud_box .hud_details {\n";
+				echo "	display: block;\n";
 				echo "}\n";
 			}
 			if ($row['dashboard_details_state'] == "contracted") {
-				echo "#".$dashboard_name." .hud_box .hud_details {\n";
+				echo "#".$dashboard_id." .widget .hud_box .hud_details {\n";
 				echo "	display: none;\n";
 				echo "}\n";
 			}
 			if ($row['dashboard_details_state'] == "hidden" || $row['dashboard_details_state'] == "disabled") {
-				echo "#".$dashboard_name." .hud_box .hud_expander, \n";
-				echo "#".$dashboard_name." .hud_box .hud_details {\n";
+				echo "#".$dashboard_id." .hud_box .hud_expander, \n";
+				echo "#".$dashboard_id." .hud_box .hud_details {\n";
 				echo "	display: none;\n";
 				echo "}\n";
 			}
@@ -441,10 +492,10 @@ foreach ($dashboard as $row) {
 	.col-num { grid-column: span 2; }
 	<?php
 		foreach ($dashboard as $row) {
-			$dashboard_name = trim(preg_replace("/[^a-z]/", '_', strtolower($row['dashboard_name'])),'_');
-			if (is_numeric($row['dashboard_column_span'])) {
-				echo "#".$dashboard_name." {\n";
-				echo "	grid-column: span ".$row['dashboard_column_span'].";\n";
+			$dashboard_id = 'id_'.md5(preg_replace('/[^-A-Fa-f0-9]/', '', $row['dashboard_uuid']));
+			if ($row['dashboard_column_span'] > 3) {
+				echo "#".$dashboard_id." {\n";
+				echo "	grid-column: span 3;\n";
 				echo "}\n";
 			}
 		}
@@ -455,6 +506,16 @@ foreach ($dashboard as $row) {
 @media (min-width: 1500px) {
 	.widgets { grid-template-columns: repeat(4, minmax(100px, 1fr)); }
 	.col-num { grid-column: span 2; }
+	<?php
+		foreach ($dashboard as $row) {
+			$dashboard_id = 'id_'.md5(preg_replace('/[^-A-Fa-f0-9]/', '', $row['dashboard_uuid']));
+			if (!empty($row['dashboard_column_span'])) {
+				echo "#".$dashboard_id." {\n";
+				echo "	grid-column: span ".$row['dashboard_column_span'].";\n";
+				echo "}\n";
+			}
+		}
+	?>
 }
 
 /* Screen larger than 2000px? 5 columns */
@@ -462,51 +523,60 @@ foreach ($dashboard as $row) {
 	.widgets { grid-template-columns: repeat(5, minmax(100px, 1fr)); }
 	.col-num { grid-column: span 2; }
 }
+
 </style>
 
 <script>
-function toggle_grid_row_end(dashboard_name) {
-	let widget = document.getElementById(dashboard_name.toLowerCase().replace(/ /g, '_'));
-	let state = widget.getAttribute('data-state');
-	let current_row_end = widget.style.gridRowEnd;
-	let current_row_end_number = current_row_end.startsWith('span ') ? Number(current_row_end.replace('span ', '')) : 0;
 
-	if (state == 'expanded') {
-		widget.style.gridRowEnd = 'span ' + (current_row_end_number - 3);
-		widget.dataset.state = 'contracted';
+document.addEventListener('click', function(event) {
+	let hud_content = event.target.closest('.hud_content');
+	let hud_expander = event.target.closest('.hud_expander');
+
+	if (hud_content || hud_expander) {
+		let widget = event.target.closest('div.widget, div.child_widget');
+
+		if (widget.classList.contains('disabled')) {
+			return;
+		}
+
+		if (widget && widget.id) {
+			toggle_grid_row_span(widget.id);
+		}
+	}
+});
+
+function toggle_grid_row_span(dashboard_id) {
+	let widget = document.getElementById(dashboard_id);
+
+	if (widget.classList.contains('expanded')) {
+		widget.classList.remove('expanded');
 	}
 	else {
-		widget.style.gridRowEnd = 'span ' + (current_row_end_number + 3);
-		widget.dataset.state = 'expanded';
+		widget.classList.add('expanded');
 	}
 }
 
 let first_toggle = false;
 
-function toggle_grid_row_end_all() {
-	let widgets = document.querySelectorAll('div.widget');
+function toggle_grid_row_span_all() {
+	const widgets = document.querySelectorAll('div.widget, div.child_widget');
 
-	widgets.forEach(div => {
-		let state = div.getAttribute('data-state');
-		let current_row_end = div.style.gridRowEnd;
-		let current_row_end_number = current_row_end.startsWith('span ') ? Number(current_row_end.replace('span ', '')) : 0;
-
-		// Skip if widget details state is disabled
-		if (state === 'disabled') {
+	widgets.forEach(widget => {
+		if (widget.classList.contains('disabled')) {
 			return;
 		}
 
-		// On the first call, skip expanded widgets
-		if (!first_toggle && state === 'expanded') {
+		if (!first_toggle && widget.classList.contains('expanded')) {
 			return;
 		}
 
-		if (state === 'expanded') {
-			div.style.gridRowEnd = 'span ' + (current_row_end_number - 3);
-			div.dataset.state = 'contracted';
-		} else {
-			div.style.gridRowEnd = 'span ' + (current_row_end_number + 3);
-			div.dataset.state = 'expanded';
+		if (widget.classList.contains('expanded') || widget.getAttribute('data-expanded-all') === 'true') {
+			widget.classList.remove('expanded');
+			widget.setAttribute('data-expanded-all', 'false');
+		}
+		else {
+			widget.classList.add('expanded');
+			widget.setAttribute('data-expanded-all', 'true');
 		}
 	});
 
@@ -521,6 +591,11 @@ function toggle_grid_row_end_all() {
 	echo "<div class='widgets' id='widgets' style='padding: 0 5px;'>\n";
 	$x = 0;
 	foreach ($dashboard as $row) {
+		//skip child widgets
+		if (!empty($row['dashboard_parent_uuid'])) {
+			continue;
+		}
+
 		//set the variables
 		$dashboard_uuid = $row['dashboard_uuid'] ?? '';
 		$dashboard_name = $row['dashboard_name'] ?? '';
@@ -532,12 +607,12 @@ function toggle_grid_row_end_all() {
 		$dashboard_content = $row['dashboard_content'] ?? '';
 		$dashboard_content_text_align = $row['dashboard_content_text_align'] ?? '';
 		$dashboard_content_details = $row['dashboard_content_details'] ?? '';
-		$dashboard_chart_type = $row['dashboard_chart_type'] ?? "doughnut";
+		$dashboard_chart_type = $row['dashboard_chart_type'] ?? '';
 		$dashboard_label_text_color = $row['dashboard_label_text_color'] ?? $settings->get('theme', 'dashboard_label_text_color', '');
 		$dashboard_number_text_color = $row['dashboard_number_text_color'] ?? $settings->get('theme', 'dashboard_number_text_color', '');
 		$dashboard_number_background_color = $row['dashboard_number_background_color'] ?? $settings->get('theme', 'dashboard_number_background_color', '');
-		$dashboard_details_state = $row['dashboard_details_state'] ?? "expanded";
-		$dashboard_row_span = $row['dashboard_row_span'] ?? 2;
+		$dashboard_details_state = $row['dashboard_details_state'] ?? 'hidden';
+		$dashboard_row_span = $row['dashboard_row_span'] ?? '';
 
 		//define the regex patterns
 		$uuid_pattern = '/[^-A-Fa-f0-9]/';
@@ -546,8 +621,8 @@ function toggle_grid_row_end_all() {
 
 		//sanitize the data
 		$dashboard_uuid = preg_replace($uuid_pattern, '', $dashboard_uuid);
+		$dashboard_id = 'id_'.md5($dashboard_uuid);
 		$dashboard_name = trim(preg_replace($text_pattern, '', $dashboard_name));
-		$dashboard_name_id = trim(preg_replace("/[^a-z_]/", '_', strtolower($dashboard_name)),'_');
 		$dashboard_icon = preg_replace($text_pattern, '', $dashboard_icon);
 		$dashboard_url = trim(preg_replace($text_pattern, '', $dashboard_url));
 		$dashboard_target = trim(preg_replace($text_pattern, '', $dashboard_target));
@@ -572,11 +647,12 @@ function toggle_grid_row_end_all() {
 		$widget_name = $dashboard_path_array[1];
 		$path_array = glob(dirname(__DIR__, 2).'/*/'.$application_name.'/resources/dashboard/'.$widget_name.'.php');
 
-		echo "<div class='widget' style='grid-row-end: span ".$dashboard_row_span.";' data-state='".$dashboard_details_state."' id='".$dashboard_name_id."' draggable='false'>\n";
+		echo "<div class='widget ".$dashboard_details_state."' id='".$dashboard_id."' ".($dashboard_path == 'dashboard/parent' ? "data-is-parent='true'" : null)." draggable='false'>\n";
 		if (file_exists($path_array[0])) {
 			include $path_array[0];
 		}
 		echo "</div>\n";
+
 
 		$x++;
 	}
@@ -628,8 +704,9 @@ function toggle_grid_row_end_all() {
 		</style>
 
 		<script>
-		var widgets = document.getElementById('widgets');
-		var sortable;
+		const widgets = document.getElementById('widgets');
+		let sortable;
+
 		//make widgets draggable
 		function edit_mode(state) {
 
@@ -638,39 +715,113 @@ function toggle_grid_row_end_all() {
 				$('.hud_box').addClass('editable');
 				$('#btn_back, #btn_save').show();
 				$('div.widget').attr('draggable',true).addClass('editable');
+				$('div.child_widget').attr('draggable',true).addClass('editable');
+
+				function update_widget_order() {
+					let widget_ids_list = [];
+					let order = 10;
+
+					widgets.querySelectorAll(':scope > div.widget[id]').forEach(widget => {
+						const widget_id = widget.id;
+
+						//add the widgets to the list
+						widget_ids_list.push(`${widget_id}|null|${order}`);
+						order += 10;
+
+						//add the nested widgets to the list
+						const nested_container = widget.querySelector('.parent_widget');
+						if (nested_container) {
+							nested_container.querySelectorAll(':scope > div.child_widget[id]').forEach(nested => {
+								const child_id = nested.id;
+								widget_ids_list.push(`${child_id}|${widget_id}|${order}`);
+								order += 10;
+							});
+						}
+					});
+
+					document.getElementById('widget_order').value = widget_ids_list;
+				}
 
 				sortable = Sortable.create(widgets, {
+					group: {
+						name: 'shared',
+						pull: function(to, from, dragEl) {
+							return !dragEl.hasAttribute('data-is-parent');
+						},
+						put: true,
+					},
 					animation: 150,
-					draggable: ".widget",
+					draggable: '.widget',
 					preventOnFilter: true,
 					ghostClass: 'ghost',
-					onSort: function (evt) {
-						let widget_ids = document.querySelectorAll("#widgets > div[id]");
-						let widget_ids_list = [];
-						for (let i = 0; i < widget_ids.length; i++) {
-							widget_ids_list.push(widget_ids[i].id);
+					onSort: update_widget_order,
+					onAdd: function (event) {
+						event.item.classList.add('widget');
+						update_widget_order();
+					},
+					onRemove: function (event) {
+						event.item.classList.remove('widget');
+						update_widget_order();
+					},
+					onMove: function (event) {
+						if (event.to !== event.from) {
+							event.dragged.classList.remove('widget');
+						} else {
+							event.dragged.classList.add('widget');
 						}
-						document.getElementById('widget_order').value = widget_ids_list;
 					},
 				});
 
-				// set initial widget order
-				let widget_ids = document.querySelectorAll("#widgets > div[id]");
-				let widget_ids_list = [];
-				for (let i = 0; i < widget_ids.length; i++) {
-					widget_ids_list.push(widget_ids[i].id);
-				}
-				document.getElementById('widget_order').value = widget_ids_list;
+				document.querySelectorAll('.parent_widget').forEach(function(container) {
+					Sortable.create(container, {
+						group: {
+							name: 'shared',
+							pull: function(to, from, dragEl) {
+								return true;
+							},
+							put: function(to, from, dragEl) {
+								return !dragEl.hasAttribute('data-is-parent');
+							},
+						},
+						animation: 150,
+						draggable: '.child_widget',
+						ghostClass: 'ghost',
+						fallbackOnBody: true,
+						swapThreshold: 0.65,
+						onSort: update_widget_order,
+						onAdd: function (event) {
+							event.item.classList.add('child_widget');
+							update_widget_order();
+						},
+						onRemove: function (event) {
+							update_widget_order();
+						},
+						onMove: function (event) {
+							if (event.to !== event.from) {
+								event.dragged.classList.remove('child_widget');
+							} else {
+								event.dragged.classList.add('child_widget');
+							}
+						},
+					});
+				});
 
 			}
 			else { // off
 
 				$('div.widget').attr('draggable',false).removeClass('editable');
+				$('div.child_widget').attr('draggable',false).removeClass('editable');
 				$('.hud_box').removeClass('editable');
 				$('#btn_back, #btn_save').hide();
 				$('span#expand_contract, #btn_edit, #btn_add').show();
 
 				sortable.option('disabled', true);
+				document.querySelectorAll('.parent_widget').forEach(el => {
+				const nested_sortable = Sortable.get(el);
+					if (nested_sortable) {
+						nested_sortable.option('disabled', true);
+					}
+				});
 
 			}
 		}
